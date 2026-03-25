@@ -11,9 +11,6 @@
     "workloadName": {
       "value": "image-copy-acr-gov"
     },
-    "containerImage": {
-      "value": ""
-    },
     "acrName": {
       "value": "myregistry"
     },

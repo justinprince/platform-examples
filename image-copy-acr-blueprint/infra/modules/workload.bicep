@@ -6,8 +6,9 @@ param location string
 @description('Base name used to derive Azure resource names.')
 param workloadName string
 
-@description('Container image for the service, including registry and tag.')
-param containerImage string
+// The container image is built into the target ACR before deployment using
+// `az acr build --registry <acrName> --image cgr-image-copy:v1`. The runtime
+// image used by the Container App is `cgr-image-copy:v1` in the target ACR.
 
 @description('CPU requested by the Container App.')
 param containerCpu string
@@ -26,6 +27,12 @@ param acrResourceGroupName string
 
 @description('Destination repository prefix in ACR, including registry host.')
 param dstRepoPrefix string
+
+@description('Path to the Dockerfile to use when building the runtime image.')
+param dockerfilePath string = 'Dockerfile'
+
+@description('UTC tag used to force deploymentScript update and rerun when changed.')
+param utcValue string = utcNow()
 
 @description('Chainguard issuer URL.')
 param issuerUrl string
@@ -122,7 +129,9 @@ var envVars = concat([
 // If `dstRepoPrefix` already includes the loginServer, preserve it; otherwise
 // build using the target registry login server.
 var repoPrefix = startsWith(dstRepoPrefix, targetRegistry.properties.loginServer) ? dstRepoPrefix : '${targetRegistry.properties.loginServer}/${dstRepoPrefix}'
-var effectiveContainerImage = '${repoPrefix}/${workloadName}:latest'
+// The build workflow places `cgr-image-copy:v1` in the registry; use that
+// explicit image name so deployments are deterministic.
+var effectiveContainerImage = '${targetRegistry.properties.loginServer}/cgr-image-copy:v1'
 
 resource targetRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   scope: resourceGroup(subscription().subscriptionId, acrResourceGroupName)
@@ -187,7 +196,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'image-copy-acr'
-          image: empty(containerImage) ? effectiveContainerImage : containerImage
+          image: effectiveContainerImage
           env: envVars
           resources: {
             cpu: json(containerCpu)
@@ -203,25 +212,9 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
-resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(targetRegistry.id, containerApp.name, 'AcrPull')
-  scope: targetRegistry
-  properties: {
-    roleDefinitionId: acrPullRoleDefinitionId
-    principalId: containerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource acrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(targetRegistry.id, containerApp.name, 'AcrPush')
-  scope: targetRegistry
-  properties: {
-    roleDefinitionId: acrPushRoleDefinitionId
-    principalId: containerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// Role assignments and deployment script for the target ACR are created at
+// subscription scope in the parent template to avoid cross-scope deployment
+// errors. See `main.bicep` for those resources.
 
 // Key Vault for holding sensitive values (static name). This deployment
 // creates a placeholder secret; operators should replace the value with
@@ -236,9 +229,20 @@ resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
       family: 'A'
       name: 'standard'
     }
-    accessPolicies: []
+    accessPolicies: [
+      {
+        tenantId: subscription().tenantId
+        objectId: containerApp.identity.principalId
+        permissions: {
+          secrets: [
+            'get'
+          ]
+        }
+      }
+    ]
     enableSoftDelete: true
   }
+  dependsOn: [ containerApp ]
 }
 
 resource kvSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {

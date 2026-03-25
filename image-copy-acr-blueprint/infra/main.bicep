@@ -9,8 +9,8 @@ param location string = 'eastus'
 @description('Base name used to derive Azure resource names.')
 param workloadName string = 'image-copy-acr'
 
-@description('Container image for the service, including registry and tag. If empty, the image will be constructed automatically in the target ACR.')
-param containerImage string = ''
+// The image is built into the target ACR using `az acr build` and is not a
+// direct deployment parameter. See README for build instructions.
 
 @description('CPU requested by the Container App, for example 0.25, 0.5, or 1.0.')
 param containerCpu string = '0.25'
@@ -34,6 +34,12 @@ param dstRepoPrefix string = ''
 // provided `acrName`. This keeps the operator experience simple while still
 // allowing explicit overrides.
 var computedDstRepoPrefix = empty(dstRepoPrefix) ? '${acrName}.azurecr.io/cgr-image-copy' : dstRepoPrefix
+
+@description('Path to the Dockerfile to use when building the runtime image. Can be a repo-local path.')
+param dockerfilePath string = 'Dockerfile'
+
+@description('UTC tag to force update of deployment script; default uses current time.')
+param utcValue string = utcNow()
 
 @description('Chainguard issuer URL.')
 param issuerUrl string = 'https://issuer.enforce.dev'
@@ -78,13 +84,14 @@ module workload './modules/workload.bicep' = {
   params: {
     location: location
     workloadName: workloadName
-    containerImage: containerImage
     containerCpu: containerCpu
     containerMemory: containerMemory
     containerPort: containerPort
     acrName: acrName
     acrResourceGroupName: acrResourceGroupName
     dstRepoPrefix: computedDstRepoPrefix
+    dockerfilePath: dockerfilePath
+    utcValue: utcValue
     issuerUrl: issuerUrl
     apiEndpoint: apiEndpoint
     groupName: groupName
@@ -95,6 +102,69 @@ module workload './modules/workload.bicep' = {
     verifySignatures: verifySignatures
     externalIngress: externalIngress
     tags: tags
+  }
+}
+
+// Existing reference to the target ACR (in a possibly different resource group).
+resource targetRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  scope: resourceGroup(subscription().subscriptionId, acrResourceGroupName)
+  name: acrName
+}
+
+var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+var acrPushRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8311e382-0749-4cb8-b61a-304f252e45ec')
+
+// Assign AcrPull and AcrPush to the Container App managed identity on the
+// target registry. These role assignments are created at subscription scope
+// and scoped to the target registry resource.
+resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(targetRegistry.id, workload.outputs.containerAppName, 'AcrPull')
+  scope: targetRegistry
+  properties: {
+    roleDefinitionId: acrPullRoleDefinitionId
+    principalId: workload.outputs.managedIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource acrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(targetRegistry.id, workload.outputs.containerAppName, 'AcrPush')
+  scope: targetRegistry
+  properties: {
+    roleDefinitionId: acrPushRoleDefinitionId
+    principalId: workload.outputs.managedIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Create a deployment script in the workload resource group to build the
+// runtime image and grant it AcrPush on the target registry.
+resource acrBuildScript 'Microsoft.Resources/deploymentScripts@2023-01-01' = {
+  name: '${workloadName}-acrBuild'
+  scope: resourceGroup(resourceGroupName)
+  location: resourceGroup(resourceGroupName).location
+  kind: 'AzureCLI'
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    forceUpdateTag: utcValue
+    azCliVersion: '2.42.0'
+    timeout: 'PT30M'
+    scriptContent: 'az acr build --registry ${acrName} --image cgr-image-copy:v1 --file ${dockerfilePath} .'
+    cleanupPreference: 'OnSuccess'
+    retentionInterval: 'P1D'
+  }
+}
+
+resource acrBuildScriptPushRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(targetRegistry.id, acrBuildScript.name, 'AcrPush')
+  scope: targetRegistry
+  dependsOn: [ acrBuildScript ]
+  properties: {
+    roleDefinitionId: acrPushRoleDefinitionId
+    principalId: acrBuildScript.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

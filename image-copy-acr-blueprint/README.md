@@ -76,7 +76,7 @@ az deployment sub create \
 
 ## Important Inputs
 
-- `containerImage`: optional. If omitted, the deployment will construct an image name automatically in the target ACR using the pattern `<loginServer>/<dstRepoPrefix>/<workloadName>:latest` (for example `myregistry.azurecr.io/mirrors/image-copy-acr:latest`). You can still override this by providing a fully-qualified image name.
+- `containerImage`: removed. The image must be built into the target ACR before deployment using `az acr build` (the deployment uses the fixed image name `cgr-image-copy:v1` in the target registry). This makes the deployment deterministic and avoids runtime bootstrap pull races.
 - `acrName`, `acrResourceGroupName`: the existing target registry.
 - `dstRepoPrefix`: destination prefix in ACR; may include the registry host or just the repository path.
 - `groupName`, `groupId`, `identityId`: Chainguard source group and identity data.
@@ -103,7 +103,13 @@ az keyvault secret set \
 - The deploy buttons still need real public GitHub raw URLs.
 - `azuredeploy.json` is the button target, while `main.bicep` remains the editable source.
 - First deploy still has an ACR bootstrap risk with system-assigned identity, because the app may need registry pull before `AcrPull` exists.
-- The service image build and push path is out of scope here; this blueprint deploys an already-published image.
+- The template can optionally build the runtime image for you during deployment using an Azure Deployment Script that runs `az acr build`. By default the template builds `cgr-image-copy:v1` into the target registry before creating or updating the Container App. You can still pre-build the image if you prefer.
+
+  - The template accepts `dockerfilePath` (defaults to `Dockerfile`) and `utcValue` (default `utcNow()`). The `utcValue` is used as the deployment script `forceUpdateTag` so you can re-run the build by changing the value.
+
+  - The deployment script runs `az acr build --registry <ACR_NAME> --image cgr-image-copy:v1 --file <dockerfilePath> .` in the target resource group.
+
+  - The deployment script is created with a system-assigned identity and the template grants it `AcrPush` on the target ACR so the script can push the built image.
 - `chainguardOidcToken` is a bootstrap mechanism. A better next step is workload identity or a secret-store-backed token acquisition flow for Chainguard auth.
 - No Event Grid, subscription automation, custom domain, WAF, or production hardening is included.
 - No portal UI definition is included yet; the parameter files are the current operator interface.
