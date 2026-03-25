@@ -33,7 +33,8 @@
     },
     "gitRepoUrl": {
       "type": "string",
-      "metadata": { "description": "HTTPS URL of your Git repo (e.g. https://github.com/org/repo)." }
+      "defaultValue": "https://github.com/justinprince/platform-examples",
+      "metadata": { "description": "HTTPS URL of the Git repo containing the Dockerfile." }
     },
     "gitRepoBranch": {
       "type": "string",
@@ -42,12 +43,12 @@
     },
     "dockerfilePath": {
       "type": "string",
-      "defaultValue": "Dockerfile",
-      "metadata": { "description": "Relative path to the Dockerfile in the repo." }
+      "defaultValue": "image-copy-acr-blueprint/infra/Dockerfile",
+      "metadata": { "description": "Relative path to the Dockerfile within the repo." }
     },
     "gitRepoContextPath": {
       "type": "string",
-      "defaultValue": ".",
+      "defaultValue": "image-copy-acr-blueprint/infra",
       "metadata": { "description": "Docker build context path relative to repo root." }
     }
   },

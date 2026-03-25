@@ -1,8 +1,10 @@
 # Chainguard Image Copy — Azure Deployment
 
-This ARM template deploys the full Azure infrastructure to build and run `cgr-image-copy:v1` using a Dockerfile in your repository, with Chainguard OIDC authentication via Azure Key Vault.
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fjustinprince%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
 
-The ACR Task build is **triggered automatically** during deployment via a `Microsoft.Resources/deploymentScripts` resource — no manual build step required.
+[![Deploy to Azure Government](https://aka.ms/deploytoazuregovbutton)](https://portal.azure.us/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fjustinprince%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
+
+Deploys the full Azure infrastructure to build and run `cgr-image-copy:v1` from your repository's Dockerfile, with Chainguard OIDC authentication via Azure Key Vault. The ACR image build is **triggered automatically** during deployment — no manual build step required.
 
 ---
 
@@ -11,13 +13,13 @@ The ACR Task build is **triggered automatically** during deployment via a `Micro
 | Resource | Description |
 |---|---|
 | **Azure Container Registry (ACR)** | Stores the built container image |
-| **ACR Task** | Defines the Docker build: clones your repo, builds, pushes `cgr-image-copy:v1` |
-| **Deployment Script** | Runs `az acr task run` automatically and polls until the build succeeds |
-| **Script Runner Identity** | Dedicated managed identity with ACR Contributor, used only by the deployment script |
-| **Azure Key Vault** | Holds the `chainguard-oidc-token` secret (placeholder — you update it post-deploy) |
+| **ACR Task** | Builds `cgr-image-copy:v1` from the Dockerfile in this repo |
+| **Deployment Script (AzureCLI)** | Automatically runs `az acr task run` during deployment and waits for success |
+| **Script Runner Identity** | Dedicated managed identity scoped to ACR Contributor, used only by the deployment script |
+| **Azure Key Vault** | Holds the `chainguard-oidc-token` secret — created as a placeholder, updated manually post-deploy |
 | **App Managed Identity** | Grants the Container App permission to pull from ACR and read the Key Vault secret |
 | **Container App Environment** | Managed environment for the Container App |
-| **Azure Container App** | Runs the container; starts only after the deployment script confirms the build succeeded |
+| **Azure Container App** | Runs the container; starts only after the build script confirms the image exists |
 | **Log Analytics Workspace** | Captures Container App logs |
 
 ---
@@ -31,52 +33,54 @@ Role Assignments (ACR Pull, KV Secrets User, ACR Contributor for script)
      ↓
 ACR Task (definition)
      ↓
-Deployment Script (triggers az acr task run, polls to completion)
+Deployment Script  ← triggers az acr task run, polls to completion
      ↓
-Container App (guaranteed the image exists before starting)
+Container App  ← guaranteed the image exists before first pull
 ```
 
 ---
 
-## Prerequisites
+## Using the Deploy to Azure Button
 
-- Azure CLI installed and logged in (`az login`)
-- A resource group: `az group create --name <rg-name> --location eastus`
-- Your `Dockerfile` committed to the Git repository referenced in the parameters
-- The deploying principal must have permission to create role assignments (Owner or User Access Administrator on the resource group)
+Clicking the button above opens the Azure Portal custom deployment UI pre-loaded with this template. The portal will prompt you for:
+
+| Parameter | Required | Default |
+|---|---|---|
+| `containerRegistryName` | **Yes** | _(none — must be globally unique)_ |
+| `location` | No | Resource group location |
+| `keyVaultName` | No | `kv-cgr-<uniqueSuffix>` |
+| `containerAppName` | No | `cgr-image-copy-app` |
+| `containerAppEnvironmentName` | No | `cgr-container-env` |
+| `gitRepoUrl` | No | `https://github.com/justinprince/platform-examples` |
+| `gitRepoBranch` | No | `main` |
+| `dockerfilePath` | No | `image-copy-acr-blueprint/infra/Dockerfile` |
+| `gitRepoContextPath` | No | `image-copy-acr-blueprint/infra` |
+
+The only value you **must** provide is a unique ACR name. All other parameters have sensible defaults pointing at this repo.
+
+> **Permissions note:** The account deploying the template must have permission to create role assignments on the resource group (Owner or User Access Administrator).
 
 ---
 
-## Deployment Steps
-
-### 1. Edit Parameters
-
-Edit `azuredeploy.parameters.json`:
-
-```json
-{
-  "containerRegistryName": { "value": "your-unique-acr-name" },
-  "gitRepoUrl":            { "value": "https://github.com/YOUR_ORG/YOUR_REPO" },
-  "gitRepoBranch":         { "value": "main" },
-  "dockerfilePath":        { "value": "Dockerfile" },
-  "gitRepoContextPath":    { "value": "." }
-}
-```
-
-### 2. Deploy
+## CLI Deployment (alternative)
 
 ```bash
+az group create --name <your-resource-group> --location eastus
+
 az deployment group create \
   --resource-group <your-resource-group> \
   --template-file azuredeploy.json \
-  --parameters @azuredeploy.parameters.json
+  --parameters @azuredeploy.parameters.json \
+  --parameters containerRegistryName=<your-unique-acr-name>
 ```
 
-The deployment will take 10–20 minutes depending on your Docker build time. The deployment script streams status every 20 seconds and fails the deployment loudly if the build fails.
+Deployment takes 10–20 minutes depending on Docker build time.
 
-### 3. Set the Chainguard OIDC Token ← Only manual step remaining
+---
 
-After deployment completes, update the Key Vault secret placeholder with your real token (the exact command is in the deployment outputs as `updateSecretCommand`):
+## Post-Deployment: Set the Chainguard OIDC Token
+
+This is the **only remaining manual step**. The Key Vault secret is created as a placeholder during deployment. Update it with your real token (the exact command is in the deployment outputs as `updateSecretCommand`):
 
 ```bash
 az keyvault secret set \
@@ -85,7 +89,7 @@ az keyvault secret set \
   --value "YOUR_ACTUAL_CHAINGUARD_OIDC_TOKEN"
 ```
 
-Then restart the Container App to pick up the new secret value:
+Then restart the Container App to pick up the new value:
 
 ```bash
 az containerapp revision restart \
@@ -99,22 +103,19 @@ az containerapp revision restart \
 
 ---
 
-## How the Build Trigger Works
+## How the Token is Mounted
 
-The `Microsoft.Resources/deploymentScripts` resource (`trigger-acr-task-build`) runs an Azure CLI container that:
+The secret is pulled live from Key Vault by the Container App's managed identity and injected into the container as:
 
-1. Calls `az acr task run --no-wait` to queue the build and capture the `runId`
-2. Polls `az acr task show-run` every 20 seconds for up to 25 minutes
-3. Exits `0` on `Succeeded` (deployment continues to Container App)
-4. Exits `1` on `Failed`, `Canceled`, or timeout (deployment fails with logs)
-
-The Container App has an explicit `dependsOn` the deployment script, so it is guaranteed to start only after the image is confirmed present in ACR.
+```
+CHAINGUARD_OIDC_TOKEN=<value>
+```
 
 ---
 
-## Private Repos
+## Private Repo Note
 
-ACR Tasks can clone public repos natively. For **private repos**, add a PAT credential after deployment:
+This repo is public, so ACR Tasks can clone it natively. If you fork this into a private repo, add a PAT credential to the ACR Task after deployment:
 
 ```bash
 az acr task credential add \
@@ -125,28 +126,16 @@ az acr task credential add \
   --password YOUR_PAT
 ```
 
-Then re-run the task (or redeploy) to pick it up.
-
 ---
 
-## Deployment Outputs
-
-| Output | Description |
-|---|---|
-| `containerRegistryLoginServer` | ACR login server (e.g. `myacr.azurecr.io`) |
-| `keyVaultName` | Name of the Key Vault |
-| `keyVaultUri` | URI of the Key Vault |
-| `containerAppFqdn` | FQDN of the running Container App |
-| `acrTaskRunId` | The ACR run ID from the automated build |
-| `updateSecretCommand` | Ready-to-run command to set the Chainguard token |
-
----
-
-## File Layout Expected in Repo
+## File Layout
 
 ```
-your-repo/
-├── Dockerfile                    ← Used by the ACR Task
-├── azuredeploy.json              ← This template
-└── azuredeploy.parameters.json
+platform-examples/
+└── image-copy-acr-blueprint/
+    └── infra/
+        ├── Dockerfile
+        ├── azuredeploy.json
+        ├── azuredeploy.parameters.json
+        └── README.md
 ```
