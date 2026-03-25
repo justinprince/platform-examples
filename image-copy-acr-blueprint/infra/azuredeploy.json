@@ -22,12 +22,6 @@
         "description": "Base name used to derive Azure resource names."
       }
     },
-    "containerImage": {
-      "type": "string",
-      "metadata": {
-        "description": "Container image for the service, including registry and tag."
-      }
-    },
     "containerCpu": {
       "type": "string",
       "defaultValue": "0.25",
