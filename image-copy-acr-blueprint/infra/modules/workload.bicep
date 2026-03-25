@@ -61,6 +61,7 @@ param tags object
 var containerAppName = '${workloadName}-app'
 var managedEnvironmentName = '${workloadName}-env'
 var workspaceName = '${workloadName}-logs'
+var keyVaultName = '${workloadName}-kv'
 var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
 var acrPushRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8311e382-0749-4cb8-b61a-304f252e45ec')
 var secrets = empty(chainguardOidcToken) ? [] : [
@@ -116,6 +117,12 @@ var envVars = concat([
     secretRef: 'chainguard-oidc-token'
   }
 ])
+
+// Compute the effective container image if the caller did not supply one.
+// If `dstRepoPrefix` already includes the loginServer, preserve it; otherwise
+// build using the target registry login server.
+var repoPrefix = startsWith(dstRepoPrefix, targetRegistry.properties.loginServer) ? dstRepoPrefix : '${targetRegistry.properties.loginServer}/${dstRepoPrefix}'
+var effectiveContainerImage = '${repoPrefix}/${workloadName}:latest'
 
 resource targetRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   scope: resourceGroup(subscription().subscriptionId, acrResourceGroupName)
@@ -180,7 +187,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'image-copy-acr'
-          image: containerImage
+          image: empty(containerImage) ? effectiveContainerImage : containerImage
           env: envVars
           resources: {
             cpu: json(containerCpu)
@@ -216,6 +223,34 @@ resource acrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
+// Key Vault for holding sensitive values (static name). This deployment
+// creates a placeholder secret; operators should replace the value with
+// real secrets after deployment.
+resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
+  name: keyVaultName
+  location: location
+  tags: tags
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    accessPolicies: []
+    enableSoftDelete: true
+  }
+}
+
+resource kvSecret 'Microsoft.KeyVault/vaults/secrets@2022-07-01' = {
+  name: '${keyVault.name}/chainguard-oidc-token'
+  properties: {
+    value: 'REPLACE_ME'
+  }
+  dependsOn: [ keyVault ]
+}
+
 output containerAppName string = containerApp.name
 output serviceUrl string = externalIngress ? 'https://${containerApp.properties.configuration.ingress.fqdn}' : ''
 output managedIdentityPrincipalId string = containerApp.identity.principalId
+output keyVaultName string = keyVault.name
+output keyVaultUri string = 'https://${keyVault.name}.vault.azure.net/'

@@ -15,14 +15,14 @@ This is intentionally a practical starting point, not a production-ready system.
 # https://github.com/justinprince/platform-examples
 
 # Prod
-# [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fchainguard-dev%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fchainguard-dev%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
 
-#  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.us/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fchainguard-dev%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazuregovbutton)](https://portal.azure.us/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fchainguard-dev%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
 
 # Test
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fjustinprince%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.us/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fjustinprince%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazuregovbutton)](https://portal.azure.us/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fjustinprince%2Fplatform-examples%2Fmain%2Fimage-copy-acr-blueprint%2Finfra%2Fazuredeploy.json)
 
 ## What This Blueprint Deploys
 
@@ -77,12 +77,27 @@ az deployment sub create \
 
 ## Important Inputs
 
-- `containerImage`: the already-built service image in your ACR, for example `myregistry.azurecr.io/image-copy-acr:latest`.
+- `containerImage`: optional. If omitted, the deployment will construct an image name automatically in the target ACR using the pattern `<loginServer>/<dstRepoPrefix>/<workloadName>:latest` (for example `myregistry.azurecr.io/mirrors/image-copy-acr:latest`). You can still override this by providing a fully-qualified image name.
 - `acrName`, `acrResourceGroupName`: the existing target registry.
-- `dstRepoPrefix`: destination prefix in ACR, for example `myregistry.azurecr.io/mirrors`.
+- `dstRepoPrefix`: destination prefix in ACR; may include the registry host or just the repository path.
 - `groupName`, `groupId`, `identityId`: Chainguard source group and identity data.
-- `chainguardOidcToken`: required bootstrap secret input for the current app code path.
+- `chainguardOidcToken`: bootstrap secret input for the current app code path (optional). The blueprint also creates an Azure Key Vault with a discoverable static name where operators can store this secret instead.
 - `containerCpu`: defaults to `0.25` so the starter shape matches a minimal Container Apps deployment.
+
+**Key Vault and secrets**
+
+- This blueprint creates an Azure Key Vault named `<workloadName>-kv` (for example `image-copy-acr-kv`) in the same resource group. It also creates a placeholder secret named `chainguard-oidc-token` with value `REPLACE_ME` to make the secret name and location discoverable.
+- After deployment, replace the placeholder with the real secret. Example:
+
+```bash
+# Replace values with your resource group and desired secret
+az keyvault secret set \
+  --vault-name <workloadName>-kv \
+  --name chainguard-oidc-token \
+  --value "<YOUR_BOOTSTRAP_OIDC_TOKEN>"
+```
+
+- Once the Key Vault contains the secret, consider migrating the app to read secrets from Key Vault or grant the app's managed identity permissions to the vault so it can fetch secrets at runtime rather than relying on bootstrap parameters.
 
 ## Current Gaps
 

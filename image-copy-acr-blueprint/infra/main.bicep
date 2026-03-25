@@ -9,8 +9,8 @@ param location string = 'eastus'
 @description('Base name used to derive Azure resource names.')
 param workloadName string = 'image-copy-acr'
 
-@description('Container image for the service, including registry and tag.')
-param containerImage string
+@description('Container image for the service, including registry and tag. If empty, the image will be constructed automatically in the target ACR.')
+param containerImage string = ''
 
 @description('CPU requested by the Container App, for example 0.25, 0.5, or 1.0.')
 param containerCpu string = '0.25'
