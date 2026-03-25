@@ -58,13 +58,14 @@
     "chainguardSecretName": "chainguard-oidc-token",
     "acrPullRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
     "kvSecretsUserRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
-    "acrPushRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8311e382-0749-4cb8-b61a-304f252e45ec')]",
     "contributorRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
     "lawName": "[concat('law-', parameters('containerAppName'))]",
     "appIdentityName": "[concat(parameters('containerAppName'), '-identity')]",
-    "scriptIdentityName": "[concat('script-runner-identity-', uniqueString(resourceGroup().id))]",
+    "scriptIdentityName": "[concat('script-runner-', uniqueString(resourceGroup().id))]",
     "deploymentScriptName": "trigger-acr-task-build",
-    "scriptStorageAccountName": "[concat('stscript', uniqueString(resourceGroup().id))]"
+    "roleAssignmentAcrPullName": "[guid(resourceGroup().id, parameters('containerRegistryName'), 'acrPull')]",
+    "roleAssignmentKvSecretName": "[guid(resourceGroup().id, parameters('keyVaultName'), 'kvSecrets')]",
+    "roleAssignmentScriptContribName": "[guid(resourceGroup().id, parameters('containerRegistryName'), 'scriptContrib')]"
   },
   "resources": [
     {
@@ -130,10 +131,7 @@
       "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
       "apiVersion": "2023-01-31",
       "name": "[variables('scriptIdentityName')]",
-      "location": "[parameters('location')]",
-      "metadata": {
-        "description": "Dedicated identity for the deploymentScript runner. Needs Contributor on the ACR to invoke az acr task run."
-      }
+      "location": "[parameters('location')]"
     },
     {
       "type": "Microsoft.App/managedEnvironments",
@@ -156,7 +154,7 @@
     {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('appIdentityName'), variables('acrPullRoleId'))]",
+      "name": "[variables('roleAssignmentAcrPullName')]",
       "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
@@ -171,7 +169,7 @@
     {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), variables('appIdentityName'), variables('kvSecretsUserRoleId'))]",
+      "name": "[variables('roleAssignmentKvSecretName')]",
       "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
@@ -184,10 +182,9 @@
       }
     },
     {
-      "comments": "Gives the script runner identity Contributor on the ACR so it can call az acr task run and az acr task logs.",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('scriptIdentityName'), variables('contributorRoleId'))]",
+      "name": "[variables('roleAssignmentScriptContribName')]",
       "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
@@ -209,10 +206,7 @@
       ],
       "identity": { "type": "SystemAssigned" },
       "properties": {
-        "platform": {
-          "os": "Linux",
-          "architecture": "amd64"
-        },
+        "platform": { "os": "Linux", "architecture": "amd64" },
         "agentConfiguration": { "cpu": 2 },
         "step": {
           "type": "Docker",
@@ -239,7 +233,6 @@
       }
     },
     {
-      "comments": "Runs 'az acr task run' automatically during deployment. Uses a dedicated managed identity with Contributor on the ACR. The script polls until the task run completes so downstream resources (Container App) know the image is ready.",
       "type": "Microsoft.Resources/deploymentScripts",
       "apiVersion": "2023-08-01",
       "name": "[variables('deploymentScriptName')]",
@@ -248,7 +241,7 @@
       "dependsOn": [
         "[resourceId('Microsoft.ContainerRegistry/registries/tasks', parameters('containerRegistryName'), variables('acrTaskName'))]",
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('scriptIdentityName'))]",
-        "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('scriptIdentityName'), variables('contributorRoleId')))]"
+        "[resourceId('Microsoft.Authorization/roleAssignments', variables('roleAssignmentScriptContribName'))]"
       ],
       "identity": {
         "type": "UserAssigned",
@@ -261,17 +254,11 @@
         "retentionInterval": "PT2H",
         "timeout": "PT30M",
         "cleanupPreference": "OnSuccess",
-        "scriptContent": "set -e\n\nREGISTRY=\"$REGISTRY_NAME\"\nTASK=\"$TASK_NAME\"\n\necho \"[deploymentScript] Triggering ACR Task: $TASK on registry: $REGISTRY\"\n\nRUN_ID=$(az acr task run \\\n  --registry \"$REGISTRY\" \\\n  --name \"$TASK\" \\\n  --no-wait \\\n  --query runId \\\n  --output tsv)\n\necho \"[deploymentScript] Task run queued with run ID: $RUN_ID\"\n\n# Poll for completion (max 25 minutes; ACR build timeout is 1h but we want to fail fast)\nMAX_WAIT=1500\nELAPSED=0\nINTERVAL=20\n\nwhile [ $ELAPSED -lt $MAX_WAIT ]; do\n  STATUS=$(az acr task show-run \\\n    --registry \"$REGISTRY\" \\\n    --run-id \"$RUN_ID\" \\\n    --query status \\\n    --output tsv 2>/dev/null || echo \"Waiting\")\n\n  echo \"[deploymentScript] Run $RUN_ID status: $STATUS (${ELAPSED}s elapsed)\"\n\n  if [ \"$STATUS\" = \"Succeeded\" ]; then\n    echo \"[deploymentScript] ACR Task run succeeded. Image cgr-image-copy:v1 is available in $REGISTRY.\"\n    echo \"{\\\"runId\\\":\\\"$RUN_ID\\\",\\\"status\\\":\\\"Succeeded\\\"}\" > $AZ_SCRIPTS_OUTPUT_PATH\n    exit 0\n  fi\n\n  if [ \"$STATUS\" = \"Failed\" ] || [ \"$STATUS\" = \"Canceled\" ] || [ \"$STATUS\" = \"Error\" ]; then\n    echo \"[deploymentScript] ACR Task run $STATUS. Check ACR run logs:\"\n    az acr task logs --registry \"$REGISTRY\" --run-id \"$RUN_ID\" || true\n    echo \"{\\\"runId\\\":\\\"$RUN_ID\\\",\\\"status\\\":\\\"$STATUS\\\"}\" > $AZ_SCRIPTS_OUTPUT_PATH\n    exit 1\n  fi\n\n  sleep $INTERVAL\n  ELAPSED=$((ELAPSED + INTERVAL))\ndone\n\necho \"[deploymentScript] Timed out waiting for ACR Task run $RUN_ID after ${MAX_WAIT}s.\"\nexit 1\n",
         "environmentVariables": [
-          {
-            "name": "REGISTRY_NAME",
-            "value": "[parameters('containerRegistryName')]"
-          },
-          {
-            "name": "TASK_NAME",
-            "value": "[variables('acrTaskName')]"
-          }
-        ]
+          { "name": "REGISTRY_NAME", "value": "[parameters('containerRegistryName')]" },
+          { "name": "TASK_NAME",     "value": "[variables('acrTaskName')]" }
+        ],
+        "scriptContent": "set -e\n\necho \"[deploymentScript] Triggering ACR Task: $TASK_NAME on registry: $REGISTRY_NAME\"\n\nRUN_ID=$(az acr task run \\\n  --registry \"$REGISTRY_NAME\" \\\n  --name \"$TASK_NAME\" \\\n  --no-wait \\\n  --query runId \\\n  --output tsv)\n\necho \"[deploymentScript] Task queued with run ID: $RUN_ID\"\n\nMAX_WAIT=1500\nELAPSED=0\nINTERVAL=20\n\nwhile [ $ELAPSED -lt $MAX_WAIT ]; do\n  STATUS=$(az acr task show-run \\\n    --registry \"$REGISTRY_NAME\" \\\n    --run-id \"$RUN_ID\" \\\n    --query status \\\n    --output tsv 2>/dev/null || echo \"Waiting\")\n\n  echo \"[deploymentScript] Run $RUN_ID status: $STATUS (${ELAPSED}s elapsed)\"\n\n  if [ \"$STATUS\" = \"Succeeded\" ]; then\n    echo \"[deploymentScript] Build succeeded. Image cgr-image-copy:v1 is ready.\"\n    echo \"{\\\"runId\\\":\\\"$RUN_ID\\\",\\\"status\\\":\\\"Succeeded\\\"}\" > $AZ_SCRIPTS_OUTPUT_PATH\n    exit 0\n  fi\n\n  if [ \"$STATUS\" = \"Failed\" ] || [ \"$STATUS\" = \"Canceled\" ] || [ \"$STATUS\" = \"Error\" ]; then\n    echo \"[deploymentScript] Build $STATUS. Fetching logs:\"\n    az acr task logs --registry \"$REGISTRY_NAME\" --run-id \"$RUN_ID\" || true\n    exit 1\n  fi\n\n  sleep $INTERVAL\n  ELAPSED=$((ELAPSED + INTERVAL))\ndone\n\necho \"[deploymentScript] Timed out after ${MAX_WAIT}s.\"\nexit 1\n"
       }
     },
     {
@@ -284,8 +271,8 @@
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName'))]",
         "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), variables('chainguardSecretName'))]",
         "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
-        "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('appIdentityName'), variables('acrPullRoleId')))]",
-        "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), variables('appIdentityName'), variables('kvSecretsUserRoleId')))]",
+        "[resourceId('Microsoft.Authorization/roleAssignments', variables('roleAssignmentAcrPullName'))]",
+        "[resourceId('Microsoft.Authorization/roleAssignments', variables('roleAssignmentKvSecretName'))]",
         "[resourceId('Microsoft.Resources/deploymentScripts', variables('deploymentScriptName'))]"
       ],
       "identity": {
