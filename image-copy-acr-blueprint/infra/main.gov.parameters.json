@@ -21,7 +21,7 @@
       "value": "rg-shared-acr-gov"
     },
     "dstRepoPrefix": {
-      "value": "myregistry.azurecr.us/mirrors"
+      "value": ""
     },
     "groupName": {
       "value": "example-group"

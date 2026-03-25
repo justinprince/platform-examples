@@ -27,8 +27,13 @@ param acrName string
 @description('Resource group that contains the target Azure Container Registry.')
 param acrResourceGroupName string
 
-@description('Destination repository prefix in ACR, including registry host, for example myregistry.azurecr.io/mirrors.')
-param dstRepoPrefix string
+@description('Destination repository prefix in ACR, including registry host, for example myregistry.azurecr.io/mirrors. If empty, defaults to "<acrName>.azurecr.io/cgr-image-copy"')
+param dstRepoPrefix string = ''
+
+// If the caller omitted `dstRepoPrefix`, synthesize a default using the
+// provided `acrName`. This keeps the operator experience simple while still
+// allowing explicit overrides.
+var computedDstRepoPrefix = empty(dstRepoPrefix) ? '${acrName}.azurecr.io/cgr-image-copy' : dstRepoPrefix
 
 @description('Chainguard issuer URL.')
 param issuerUrl string = 'https://issuer.enforce.dev'
@@ -79,7 +84,7 @@ module workload './modules/workload.bicep' = {
     containerPort: containerPort
     acrName: acrName
     acrResourceGroupName: acrResourceGroupName
-    dstRepoPrefix: dstRepoPrefix
+    dstRepoPrefix: computedDstRepoPrefix
     issuerUrl: issuerUrl
     apiEndpoint: apiEndpoint
     groupName: groupName
