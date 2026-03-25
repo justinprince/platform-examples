@@ -27,7 +27,6 @@ This is intentionally a practical starting point, not a production-ready system.
 ## What This Blueprint Deploys
 
 - A resource group for the mirror service.
-- A Log Analytics workspace.
 - An Azure Container Apps environment.
 - A public Azure Container App for the image-copy webhook receiver.
 - `AcrPull` and `AcrPush` role assignments on an existing target ACR.
