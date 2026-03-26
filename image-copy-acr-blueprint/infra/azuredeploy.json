@@ -123,6 +123,9 @@
       }
     }
   },
+  "variables": {
+    "workspaceName": "[format('{0}-logs', parameters('workloadName'))]"
+  },
   "resources": [
     {
       "type": "Microsoft.Resources/resourceGroups",
