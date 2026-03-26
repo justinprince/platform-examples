@@ -12,10 +12,13 @@
       "value": "main"
     },
     "dockerfilePath": {
-      "value": "image-copy-acr-blueprint/infra/Dockerfile"
+      "value": "Dockerfile"
     },
     "gitRepoContextPath": {
-      "value": "image-copy-acr-blueprint/infra"
+      "value": "claude-image-copy-acr-blueprint"
+    },
+    "chainguardOidcToken": {
+      "value": "REPLACE_WITH_CHAINCTL_OIDC_TOKEN"
     }
   }
 }
