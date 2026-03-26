@@ -50,6 +50,16 @@
       "type": "string",
       "defaultValue": "image-copy-acr-blueprint/infra",
       "metadata": { "description": "Docker build context path relative to repo root." }
+    },
+    "chainguardOrg": {
+      "type": "string",
+      "defaultValue": "justin.prince",
+      "metadata": { "description": "Chainguard organization name." }
+    },
+    "chainguardIdentity": {
+      "type": "string",
+      "defaultValue": "taco",
+      "metadata": { "description": "Chainguard identity name." }
     }
   },
   "variables": {
@@ -57,6 +67,7 @@
     "imageName": "cgr-image-copy:v1",
     "chainguardSecretName": "chainguard-oidc-token",
     "acrPullRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+    "acrPushRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8311e382-0142-4def-8143-c8376144b665')]",
     "kvSecretsUserRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
     "contributorRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
     "lawName": "[concat('law-', parameters('containerAppName'))]",
@@ -162,6 +173,21 @@
       ],
       "properties": {
         "roleDefinitionId": "[variables('acrPullRoleId')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName'))).principalId]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceGroup().id, parameters('containerRegistryName'), 'acrPush')]",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[variables('acrPushRoleId')]",
         "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName'))).principalId]",
         "principalType": "ServicePrincipal"
       }
@@ -311,6 +337,14 @@
                 {
                   "name": "CHAINGUARD_OIDC_TOKEN",
                   "secretRef": "chainguard-oidc-token"
+                },
+                {
+                  "name": "CHAINGUARD_ORG",
+                  "value": "[parameters('chainguardOrg')]"
+                },
+                {
+                  "name": "CHAINGUARD_IDENTITY",
+                  "value": "[parameters('chainguardIdentity')]"
                 }
               ],
               "resources": {
