@@ -11,16 +11,6 @@
       "maxLength": 50,
       "metadata": { "description": "Globally unique ACR name (5-50 alphanumeric chars)." }
     },
-    "targetSubscriptionId": {
-      "type": "string",
-      "defaultValue": "[subscription().subscriptionId]",
-      "metadata": { "description": "Subscription ID that contains the Azure Container Registry used for AcrPull and AcrPush role assignments." }
-    },
-    "targetResourceGroupName": {
-      "type": "string",
-      "defaultValue": "[resourceGroup().name]",
-      "metadata": { "description": "Resource group name that contains the Azure Container Registry used for AcrPull and AcrPush role assignments." }
-    },
     "location": {
       "type": "string",
       "defaultValue": "[resourceGroup().location]",
@@ -112,12 +102,12 @@
     "appIdentityName": "[concat(parameters('containerAppName'), '-identity')]",
     "scriptIdentityName": "[concat('script-runner-', uniqueString(resourceGroup().id))]",
     "deploymentScriptName": "trigger-acr-task-build",
-    "roleAssignmentAcrPushName": "[guid(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('targetSubscriptionId'), parameters('targetResourceGroupName')), 'Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('appIdentityName'), 'acrPush')]",
-    "roleAssignmentAcrPullName": "[guid(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('targetSubscriptionId'), parameters('targetResourceGroupName')), 'Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('appIdentityName'), 'acrPull')]",
+    "roleAssignmentAcrPushName": "[guid(extensionResourceId(resourceGroup().id, 'Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('appIdentityName'), 'acrPush')]",
+    "roleAssignmentAcrPullName": "[guid(extensionResourceId(resourceGroup().id, 'Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('appIdentityName'), 'acrPull')]",
     "roleAssignmentKvSecretName": "[guid(extensionResourceId(resourceGroup().id, 'Microsoft.KeyVault/vaults', parameters('keyVaultName')), variables('appIdentityName'), 'kvSecrets')]",
-    "roleAssignmentScriptContribName": "[guid(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('targetSubscriptionId'), parameters('targetResourceGroupName')), 'Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('scriptIdentityName'), 'scriptContrib')]",
+    "roleAssignmentScriptContribName": "[guid(extensionResourceId(resourceGroup().id, 'Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), variables('scriptIdentityName'), 'scriptContrib')]",
     "destinationRepository": "[concat(parameters('containerRegistryName'), '.azurecr.io/cgr-image-copy')]",
-    "acrScope": "[format('/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.ContainerRegistry/registries/{2}', parameters('targetSubscriptionId'), parameters('targetResourceGroupName'), parameters('containerRegistryName'))]",
+    "acrScope": "[format('{0}/providers/Microsoft.ContainerRegistry/registries/{1}', resourceGroup().id, parameters('containerRegistryName'))]",
     "keyVaultScope": "[format('{0}/providers/Microsoft.KeyVault/vaults/{1}', resourceGroup().id, parameters('keyVaultName'))]"
   },
   "resources": [
