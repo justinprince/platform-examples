@@ -107,6 +107,10 @@
     "appIdentityName": "[concat(parameters('containerAppName'), '-identity')]",
     "scriptIdentityName": "[concat('script-runner-', uniqueString(resourceGroup().id))]",
     "deploymentScriptName": "trigger-acr-task-build",
+    "roleAssignmentAcrPullName": "[guid(variables('acrScope'), variables('appIdentityName'), variables('acrPullRoleId'))]",
+    "roleAssignmentAcrPushName": "[guid(variables('acrScope'), variables('appIdentityName'), variables('acrPushRoleId'))]",
+    "roleAssignmentKvSecretName": "[guid(variables('keyVaultScope'), variables('appIdentityName'), variables('kvSecretsUserRoleId'))]",
+    "roleAssignmentScriptContribName": "[guid(variables('acrScope'), variables('scriptIdentityName'), variables('contributorRoleId'))]",
     "destinationRepository": "[concat(parameters('containerRegistryName'), '.azurecr.io/cgr-image-copy')]",
     "acrScopeBase": "[if(empty(parameters('acrResourceGroupName')), resourceGroup().id, format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('acrResourceGroupName')))]",
     "acrScope": "[format('{0}/providers/Microsoft.ContainerRegistry/registries/{1}', variables('acrScopeBase'), parameters('containerRegistryName'))]",
@@ -179,7 +183,7 @@
     {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "name": "[guid(variables('acrScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName')), '2023-01-31').principalId, variables('acrPullRoleId'))]",
+      "name": "[variables('roleAssignmentAcrPullName')]",
       "scope": "[variables('acrScope')]",
       "dependsOn": [
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName'))]"
@@ -193,7 +197,7 @@
     {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "name": "[guid(variables('acrScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName')), '2023-01-31').principalId, variables('acrPushRoleId'))]",
+      "name": "[variables('roleAssignmentAcrPushName')]",
       "scope": "[variables('acrScope')]",
       "dependsOn": [
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName'))]"
@@ -207,7 +211,7 @@
     {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "name": "[guid(variables('keyVaultScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName')), '2023-01-31').principalId, variables('kvSecretsUserRoleId'))]",
+      "name": "[variables('roleAssignmentKvSecretName')]",
       "scope": "[variables('keyVaultScope')]",
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
@@ -222,7 +226,7 @@
     {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "name": "[guid(variables('acrScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('scriptIdentityName')), '2023-01-31').principalId, variables('contributorRoleId'))]",
+      "name": "[variables('roleAssignmentScriptContribName')]",
       "scope": "[variables('acrScope')]",
       "dependsOn": [
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('scriptIdentityName'))]"
@@ -279,7 +283,7 @@
         "[resourceId('Microsoft.ContainerRegistry/registries/tasks', parameters('containerRegistryName'), variables('acrTaskName'))]",
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('scriptIdentityName'))]",
         "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
-        "[extensionResourceId(variables('acrScope'), 'Microsoft.Authorization/roleAssignments', guid(variables('acrScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('scriptIdentityName')), '2023-01-31').principalId, variables('contributorRoleId')))]"
+        "[extensionResourceId(variables('acrScope'), 'Microsoft.Authorization/roleAssignments', variables('roleAssignmentScriptContribName'))]"
       ],
       "identity": {
         "type": "UserAssigned",
@@ -311,9 +315,9 @@
         "[resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName'))]",
         "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
         "[resourceId('Microsoft.Resources/deploymentScripts', variables('deploymentScriptName'))]",
-        "[extensionResourceId(variables('acrScope'), 'Microsoft.Authorization/roleAssignments', guid(variables('acrScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName')), '2023-01-31').principalId, variables('acrPullRoleId')))]",
-        "[extensionResourceId(variables('acrScope'), 'Microsoft.Authorization/roleAssignments', guid(variables('acrScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName')), '2023-01-31').principalId, variables('acrPushRoleId')))]",
-        "[extensionResourceId(variables('keyVaultScope'), 'Microsoft.Authorization/roleAssignments', guid(variables('keyVaultScope'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('appIdentityName')), '2023-01-31').principalId, variables('kvSecretsUserRoleId')))]"
+        "[extensionResourceId(variables('acrScope'), 'Microsoft.Authorization/roleAssignments', variables('roleAssignmentAcrPullName'))]",
+        "[extensionResourceId(variables('acrScope'), 'Microsoft.Authorization/roleAssignments', variables('roleAssignmentAcrPushName'))]",
+        "[extensionResourceId(variables('keyVaultScope'), 'Microsoft.Authorization/roleAssignments', variables('roleAssignmentKvSecretName'))]"
       ],
       "identity": {
         "type": "UserAssigned",
