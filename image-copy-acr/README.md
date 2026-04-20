@@ -121,7 +121,7 @@ az acr login --name <existing_acr_name>
 ### 4. Initialize and apply
 
 ```sh
-cd iac
+cd iac #If not already there from previous step
 tf init
 tf apply
 ```

@@ -123,6 +123,8 @@ resource "azurerm_container_app" "replicator" {
   container_app_environment_id = azurerm_container_app_environment.main.id
   revision_mode                = "Single"
 
+  depends_on = [null_resource.docker_build_push]
+
   secret {
     name  = "chainguard-identity"
     value = chainguard_identity.azure.id
