@@ -1,97 +1,64 @@
-variable "name" {
-  description = "Name prefix for resources."
-  type        = string
-}
-
 variable "location" {
-  description = "Azure region."
+  description = "Azure region to deploy into."
   type        = string
   default     = "eastus"
 }
 
-variable "resource_group_name" {
-  description = "Resource group name."
-  type        = string
-}
-
-variable "image" {
-  description = "Container image to deploy, including registry and tag."
-  type        = string
-}
-
-variable "registry_name" {
-  description = "ACR registry resource name, e.g. myregistry."
-  type        = string
-}
-
-variable "registry_resource_group_name" {
-  description = "Resource group that contains the ACR resource."
-  type        = string
-}
-
-variable "registry_server" {
-  description = "ACR registry server, e.g. myregistry.azurecr.io."
-  type        = string
-}
-
-variable "acr_registry" {
-  description = "Optional ACR registry hostname override."
-  type        = string
-  default     = ""
-}
-
-variable "issuer_url" {
-  description = "Chainguard issuer URL."
-  type        = string
-  default     = "https://issuer.enforce.dev"
-}
-
-variable "api_endpoint" {
-  description = "Chainguard API endpoint."
-  type        = string
-  default     = "https://console-api.enforce.dev"
-}
+# ── Chainguard ───────────────────────────────────────────────────────────────
 
 variable "group_name" {
-  description = "Chainguard group name that owns the source repos."
+  description = "Chainguard group name to subscribe to (e.g. 'your.org.com')."
   type        = string
 }
 
-variable "group" {
-  description = "Chainguard group ID."
-  type        = string
-}
+# ── Image replication ────────────────────────────────────────────────────────
 
-variable "identity" {
-  description = "Chainguard identity ID."
+variable "dst_repo_prefix" {
+  description = "Path prefix inside the ACR for copied images (e.g. 'mirrors'). Images land at <acr_login_server>/<dst_repo_prefix>/<image>:<tag>."
   type        = string
-}
-
-variable "dst_repo" {
-  description = "Destination repo prefix in ACR, including registry hostname."
-  type        = string
+  default     = "chainguard"
 }
 
 variable "ignore_referrers" {
-  description = "Whether to ignore signatures/attestations."
+  description = "Skip copying signature and attestation tags (tags that start with 'sha256-')."
   type        = bool
   default     = false
 }
 
 variable "verify_signatures" {
-  description = "Whether to verify signatures before copying."
+  description = "Verify Chainguard image signatures before copying. Requires a network call to the Rekor transparency log."
   type        = bool
   default     = false
 }
 
-variable "port" {
-  description = "Listening port."
-  type        = number
-  default     = 8080
+# ── ACR: optional existing registry ─────────────────────────────────────────
+#
+# Leave both variables at their defaults ("") to have Terraform create a new
+# Basic-tier ACR inside the generated resource group.
+#
+# Set both variables to reuse an ACR that was provisioned outside of this
+# module (e.g. a shared registry managed by a platform team).  The identity
+# will still receive AcrPull/AcrPush at the resource-group level of that ACR.
+
+variable "existing_acr_name" {
+  description = "Name of an existing ACR to target (e.g. 'myregistry'). Leave blank to create a new one."
+  type        = string
+  default     = ""
 }
 
-variable "oidc_token" {
-  description = "OIDC token used to exchange for a Chainguard token."
+variable "existing_acr_resource_group" {
+  description = "Resource group containing the existing ACR. Required when existing_acr_name is set."
   type        = string
-  sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = var.existing_acr_name == "" || var.existing_acr_resource_group != ""
+    error_message = "existing_acr_resource_group must be set when existing_acr_name is provided."
+  }
+}
+
+variable "sub_id" {
+  description = "Azure subscription ID"
+  type        = string
+  default     = ""
 }

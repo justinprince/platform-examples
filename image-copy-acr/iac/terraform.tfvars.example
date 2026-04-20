@@ -1,17 +1,13 @@
-name                = "image-copy"
-location            = "eastus"
-resource_group_name = "image-copy-rg"
+location   = "eastus"
+group_name = "your.org.com"
 
-registry_name                = "myregistry"
-registry_resource_group_name = "shared-registry-rg"
-registry_server              = "myregistry.azurecr.io"
-image                        = "myregistry.azurecr.io/image-copy-acr:latest"
-
-group_name = "your.org"
-group      = "replace-with-chainguard-group-id"
-identity   = "replace-with-chainguard-identity-id"
-dst_repo   = "myregistry.azurecr.io/mirrors"
-oidc_token = "replace-me"
-
-ignore_referrers  = true
+dst_repo_prefix   = "mirrors"
+ignore_referrers  = false
 verify_signatures = false
+
+# ── Existing ACR (optional) ──────────────────────────────────────────────────
+# Leave both commented out to let Terraform create a new ACR automatically.
+# Fill in both to reuse an ACR that already exists in your subscription.
+#
+# existing_acr_name           = "myregistry"
+# existing_acr_resource_group = "my-platform-rg"

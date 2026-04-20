@@ -67,9 +67,21 @@ func init() {
 	}
 	log.Printf("using ACR registry: %s", acrRegistry)
 
-	cred, err := azidentity.NewDefaultAzureCredential(nil)
-	if err != nil {
-		log.Panicf("failed to initialize Azure credential: %s", err)
+	var cred azcore.TokenCredential
+	if clientID := strings.TrimSpace(os.Getenv("AZURE_CLIENT_ID")); clientID != "" {
+		c, err := azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{
+			ID: azidentity.ClientID(clientID),
+		})
+		if err != nil {
+			log.Panicf("failed to initialize managed identity credential: %s", err)
+		}
+		cred = c
+	} else {
+		c, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			log.Panicf("failed to initialize Azure credential: %s", err)
+		}
+		cred = c
 	}
 	azureCredential = cred
 
@@ -391,7 +403,19 @@ func loadOIDCToken() (string, error) {
 	if tokenFile := strings.TrimSpace(os.Getenv("AZURE_FEDERATED_TOKEN_FILE")); tokenFile != "" {
 		return loadTokenFile(tokenFile)
 	}
-
+	// Fall back to the Azure managed-identity token endpoint.
+	// Covers Container Apps (and other Azure-hosted environments) where a
+	// managed identity is attached but no token file is projected.
+	if azureCredential != nil {
+		tok, err := azureCredential.GetToken(context.Background(), policy.TokenRequestOptions{
+			Scopes: []string{"api://AzureADTokenExchange"},
+		})
+		if err != nil {
+			log.Printf("Warning: failed to get Azure managed identity OIDC token: %v", err)
+		} else {
+			return tok.Token, nil
+		}
+	}
 	return "", fmt.Errorf("no OIDC token source found; set OIDC_TOKEN, OIDC_TOKEN_FILE, or AZURE_FEDERATED_TOKEN_FILE")
 }
 
