@@ -48,7 +48,7 @@ Images pushed to `cgr.dev/<group_name>/<repo>:<tag>` will be mirrored to `<dst_r
 
 - `ignore_referrers = true` keeps signatures and attestations out of the mirror.
 - `verify_signatures = true` verifies signatures before copying.
-- The Container App uses a system-assigned managed identity for ACR auth.
+- The Container App uses a user-assigned managed identity (`mi-cgr-acr-pushpull`) for ACR auth.
 - Terraform grants that identity `AcrPull` and `AcrPush` on the target registry.
 - `ACR_REGISTRY` is optional and defaults from `dst_repo`.
 
