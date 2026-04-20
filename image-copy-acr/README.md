@@ -1,55 +1,177 @@
-# `image-copy-acr`
+# image-copy-acr — Infrastructure
 
-This deploys a small service that listens for `registry.push` events from a private Chainguard Registry group and mirrors pushed images into Azure Container Registry.
+Terraform module that deploys the `image-copy-acr` service to Azure Container Apps. The service subscribes to Chainguard registry push events and automatically copies new images into an Azure Container Registry (ACR).
 
-The intended path is Azure Container Apps. The Terraform in `iac/` deploys the service and exposes a public HTTPS endpoint for the webhook.
+If you supply `existing_acr_name` (and `existing_acr_resource_group`), Terraform will reuse that registry — no new ACR is created. Leave both variables unset and Terraform creates a fresh Basic-tier ACR in the generated resource group. Either way, the rest of the deployment (Container App, managed identity, Chainguard identity and subscription) is identical.
 
-## Setup
+## How it works
 
-Build and push the service image to your ACR:
-
-```sh
-REGISTRY_NAME=""
-az acr login --name ${REGISTRY_NAME}
-docker build -t ${REGISTRY_NAME}$.azurecr.io/image-copy-acr:latest .
-docker push ${REGISTRY_NAME}.azurecr.io/image-copy-acr:latest
+```
+Chainguard Registry
+       │  image pushed
+       ▼
+Chainguard Subscription ──► Container App (ca-cgr-replicator)  [HTTPS]
+                                    │  copies image
+                                    ▼
+                             Azure Container Registry
 ```
 
-Create your Terraform vars file:
+1. Chainguard sends a CloudEvent (HTTPS POST) to the Container App's public HTTPS endpoint whenever an image is pushed to any repository in your group.
+2. The app authenticates to `cgr.dev` using a Chainguard token exchanged via Azure AD workload identity.
+3. The app copies the image to the target ACR using its managed identity for authentication.
+
+---
+
+## Resources created
+
+### Azure
+
+| Resource | Name | Notes |
+|---|---|---|
+| Resource Group | `rg-cgr-imagereplication-<random>` | All resources below are placed here unless noted |
+| Container Registry | `acrcgr<random>` | Created only when no existing ACR is supplied |
+| User-Assigned Managed Identity | `mi-cgr-acr-pushpull` | Used by the Container App to pull/push ACR images |
+| Role Assignment | `AcrPull` | Scoped to the resource group that contains the ACR |
+| Role Assignment | `AcrPush` | Scoped to the resource group that contains the ACR |
+| Container App Environment | `ace-cgr-replicator` | Consumption (serverless) plan |
+| Container App | `ca-cgr-replicator` | Runs the Docker-built replicator image |
+
+### Chainguard
+
+| Resource | Description |
+|---|---|
+| `chainguard_identity` | Workload identity bound to the managed identity via Azure AD claim matching |
+| `chainguard_rolebinding` | Grants the identity `registry.pull` on the target group |
+| `chainguard_subscription` | Sends push events to the Container App's public URL |
+
+---
+
+## Prerequisites
+
+### Tools
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.3
+- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) — authenticated with `az login`
+- [Chainguard CLI (`chainctl`)](https://edu.chainguard.dev/chainguard/chainguard-enforce/how-to-install-chainctl/) — authenticated with `chainctl auth login`
+- [Docker](https://docs.docker.com/get-docker/) — Terraform builds and pushes the container image via `docker` during `apply`
+
+### Azure permissions
+
+The identity running Terraform needs:
+
+- **Contributor** (or equivalent) on the subscription or resource group to create resources
+- **User Access Administrator** on the ACR's resource group to assign AcrPull/AcrPush roles
+
+### Chainguard permissions
+
+The identity running Terraform needs **Owner** or **Editor** on the target Chainguard group to create identities, role bindings, and subscriptions.
+
+---
+
+## Deployment steps
+
+### 1. Authenticate
+
+```sh
+az login
+chainctl auth login
+```
+
+### 2. Copy and edit the variables file
+
+```sh
+cp iac/terraform.tfvars.example iac/terraform.tfvars
+```
+
+Edit `terraform.tfvars` and set at minimum:
+
+```hcl
+chainguard_org = "your.org.com"   # your Chainguard organization name
+```
+
+To use an existing ACR instead of creating a new one, also set:
+
+```hcl
+existing_acr_name           = "myregistry"
+existing_acr_resource_group = "my-platform-rg"
+```
+
+### 3. Authenticate Docker to the ACR
+
+Terraform builds and pushes the container image using Docker during `terraform apply`. The `docker` CLI must be authenticated to the ACR before running `terraform apply`.
+
+**New ACR (Terraform will create it):** Run this _after_ step 4's `init`, but you will need to do a targeted apply first:
 
 ```sh
 cd iac
-cp terraform.tfvars.example terraform.tfvars
+terraform apply -target=azurerm_container_registry.new
+az acr login --name $(terraform output -raw acr_login_server | cut -d. -f1)
 ```
 
-Fill in these values in `terraform.tfvars`:
+**Existing ACR:**
 
-- `registry_name`, `registry_resource_group_name`, `registry_server`: the target ACR resource and login server.
-- `image`: the pushed service image, for example `myregistry.azurecr.io/image-copy-acr:latest`.
-- `group_name`: the Chainguard group name to mirror from.
-- `group`: the Chainguard group ID used to validate webhook requests.
-- `identity`: the Chainguard identity ID used to pull image metadata and image contents.
-- `dst_repo`: the ACR destination prefix, for example `myregistry.azurecr.io/mirrors`.
-- `oidc_token`: the OIDC token exchanged for the Chainguard identity above.
+```sh
+az acr login --name <existing_acr_name>
+```
 
-Apply the Terraform:
+### 4. Initialize and apply
 
 ```sh
 cd iac
 terraform init
-terraform apply -var-file=terraform.tfvars
+terraform apply
 ```
 
-Terraform outputs the public URL for the service. Use that URL as the sink for your Chainguard `registry.push` subscription.
+Review the plan and confirm. On the first run this takes a few minutes — Docker builds the image and pushes it before the Container App is created.
 
-Images pushed to `cgr.dev/<group_name>/<repo>:<tag>` will be mirrored to `<dst_repo>/<repo>:<tag>`.
+### 5. Verify
 
-## Notes
+```sh
+terraform output webhook_url   # Chainguard subscription sink
+terraform output dst_repo      # Where images are copied to
+```
 
-- `ignore_referrers = true` keeps signatures and attestations out of the mirror.
-- `verify_signatures = true` verifies signatures before copying.
-- The Container App uses a user-assigned managed identity (`mi-cgr-acr-pushpull`) for ACR auth.
-- Terraform grants that identity `AcrPull` and `AcrPush` on the target registry.
-- `ACR_REGISTRY` is optional and defaults from `dst_repo`.
+You can also check the Container App logs in the Azure Portal or via:
 
-An Azure Functions example is still available under `iac/function`, but `iac/` is the default deployment path.
+```sh
+az containerapp logs show \
+  --name ca-cgr-replicator \
+  --resource-group $(terraform output -raw resource_group) \
+  --follow
+```
+
+---
+
+## Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `chainguard_org` | yes | — | Chainguard organization name (e.g. `your.org.com`) |
+| `location` | no | `eastus` | Azure region |
+| `dst_repo_prefix` | no | `mirrors` | Path prefix in the ACR for copied images |
+| `ignore_referrers` | no | `false` | Skip copying signature/attestation tags |
+| `verify_signatures` | no | `false` | Verify Chainguard signatures before copying |
+| `existing_acr_name` | no | `""` | Name of an existing ACR to use; leave blank to create one |
+| `existing_acr_resource_group` | no | `""` | Resource group of the existing ACR; required when `existing_acr_name` is set |
+
+## Outputs
+
+| Output | Description |
+|---|---|
+| `resource_group` | Name of the generated resource group |
+| `acr_login_server` | ACR hostname (e.g. `myregistry.azurecr.io`) |
+| `dst_repo` | Full destination repo prefix for copied images |
+| `webhook_url` | Public URL of the Container App / Chainguard subscription sink |
+| `managed_identity_id` | Resource ID of `mi-cgr-acr-pushpull` |
+| `chainguard_identity_id` | Chainguard identity ID used by the Container App |
+
+---
+
+## Teardown
+
+```sh
+cd iac
+terraform destroy
+```
+
+This removes all resources created by this module, including the Chainguard subscription, identity, and role binding.
