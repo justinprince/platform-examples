@@ -37,6 +37,18 @@ resource "chainguard_rolebinding" "puller" {
   group    = data.chainguard_group.group.id
 }
 
+# Grant the identity viewer access so it can list IAM service principals
+# for signature verification (APKO_BUILDER, CATALOG_SYNCER).
+data "chainguard_role" "viewer" {
+  name = "viewer"
+}
+
+resource "chainguard_rolebinding" "viewer" {
+  identity = chainguard_identity.azure.id
+  role     = data.chainguard_role.viewer.items[0].id
+  group    = data.chainguard_group.group.id
+}
+
 # Subscribe to push events under the group.  Chainguard will POST a
 # CloudEvent to the Container App's public URL whenever an image is pushed
 # to any repository in the group.

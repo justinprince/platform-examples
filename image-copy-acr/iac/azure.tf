@@ -5,7 +5,7 @@ locals {
   # Scope for role assignments: the resource group that owns the ACR.
   acr_rg_id = var.existing_acr_name != "" ? data.azurerm_resource_group.acr_rg[0].id : azurerm_resource_group.main.id
 
-  image_repo = "${local.acr_login_server}/image-copy-acr/copier"
+  image_repo = "${local.acr_login_server}/cgr/image-copier"
   image_tag  = "latest"
 }
 
@@ -78,7 +78,7 @@ resource "null_resource" "docker_build_push" {
 # resolvable from this module (requires the module to be published).
 #
 # resource "ko_build" "image" {
-#   repo        = "${local.acr_login_server}/image-copy-acr/copier"
+#   repo        = "${local.acr_login_server}/cgr/image-copier"
 #   importpath  = "github.com/chainguard-dev/platform-examples/image-copy-acr"
 #   working_dir = "${path.cwd}/.."
 #   sbom        = "none"
