@@ -17,7 +17,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/Azure/azure-sdk-for-go/sdk/containers/azcontainerregistry"
 	"chainguard.dev/sdk/events"
 	"chainguard.dev/sdk/events/receiver"
 	"chainguard.dev/sdk/events/registry"
@@ -26,6 +25,7 @@ import (
 	"chainguard.dev/sdk/sts"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	cehttp "github.com/cloudevents/sdk-go/v2/protocol/http"
+	"github.com/chrismellard/docker-credential-acr-env/pkg/credhelper"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -43,29 +43,19 @@ type envConfig struct {
 	Identity         string `envconfig:"IDENTITY" required:"true"`
 	Port             int    `envconfig:"PORT" default:"8080" required:"true"`
 	DstRepo          string `envconfig:"DST_REPO" required:"true"`
-	AcrRegistry      string `envconfig:"ACR_REGISTRY"`
 	IgnoreReferrers  bool   `envconfig:"IGNORE_REFERRERS" required:"true"`
 	VerifySignatures bool   `envconfig:"VERIFY_SIGNATURES" required:"true"`
 }
 
 var env envConfig
 var keychain authn.Keychain
-var acrRegistry string
 var azureCredential azcore.TokenCredential
+var azureKeychain authn.Keychain = authn.NewKeychainFromHelper(credhelper.NewACRCredentialsHelper())
 
 func init() {
 	if err := envconfig.Process("", &env); err != nil {
 		log.Panicf("failed to process env var: %s", err)
 	}
-
-	acrRegistry = strings.TrimSpace(env.AcrRegistry)
-	if acrRegistry == "" {
-		acrRegistry = strings.TrimSpace(dstRegistryFromRepo(env.DstRepo))
-	}
-	if acrRegistry == "" {
-		log.Panic("failed to determine ACR registry; set ACR_REGISTRY or provide DST_REPO with a registry")
-	}
-	log.Printf("using ACR registry: %s", acrRegistry)
 
 	var cred azcore.TokenCredential
 	if clientID := strings.TrimSpace(os.Getenv("AZURE_CLIENT_ID")); clientID != "" {
@@ -87,9 +77,7 @@ func init() {
 
 	keychain = authn.NewMultiKeychain(
 		cgKeychain{},
-		acrKeychain{
-			registry: acrRegistry,
-		},
+		azureKeychain,
 		authn.DefaultKeychain,
 	)
 }
@@ -234,72 +222,6 @@ func (k cgKeychain) Resolve(res authn.Resource) (authn.Authenticator, error) {
 	}, nil
 }
 
-type acrKeychain struct {
-	registry string
-}
-
-func (k acrKeychain) Resolve(res authn.Resource) (authn.Authenticator, error) {
-	if res.RegistryStr() != k.registry {
-		return authn.Anonymous, nil
-	}
-
-	return acrAuthenticator{registry: k.registry}, nil
-}
-
-type acrAuthenticator struct {
-	registry string
-}
-
-func (a acrAuthenticator) Authorization() (*authn.AuthConfig, error) {
-	return a.AuthorizationContext(context.Background())
-}
-
-func (a acrAuthenticator) AuthorizationContext(ctx context.Context) (*authn.AuthConfig, error) {
-	token, err := acrRefreshToken(ctx, a.registry)
-	if err != nil {
-		return nil, err
-	}
-
-	return &authn.AuthConfig{
-		IdentityToken: token,
-	}, nil
-}
-
-func acrRefreshToken(ctx context.Context, registry string) (string, error) {
-	tok, err := azureCredential.GetToken(ctx, policyTokenRequestOptions())
-	if err != nil {
-		return "", fmt.Errorf("getting Azure access token: %w", err)
-	}
-
-	client, err := azcontainerregistry.NewAuthenticationClient("https://"+registry, nil)
-	if err != nil {
-		return "", fmt.Errorf("creating ACR auth client: %w", err)
-	}
-
-	resp, err := client.ExchangeAADAccessTokenForACRRefreshToken(
-		ctx,
-		azcontainerregistry.PostContentSchemaGrantTypeAccessToken,
-		registry,
-		&azcontainerregistry.AuthenticationClientExchangeAADAccessTokenForACRRefreshTokenOptions{
-			AccessToken: &tok.Token,
-		},
-	)
-	if err != nil {
-		return "", fmt.Errorf("exchanging AAD token for ACR refresh token: %w", err)
-	}
-	if resp.RefreshToken == nil || strings.TrimSpace(*resp.RefreshToken) == "" {
-		return "", fmt.Errorf("ACR refresh token response was empty")
-	}
-
-	return *resp.RefreshToken, nil
-}
-
-func policyTokenRequestOptions() policy.TokenRequestOptions {
-	return policy.TokenRequestOptions{
-		Scopes: []string{"https://containerregistry.azure.net/.default"},
-	}
-}
-
 func verifyImageSignatures(ctx context.Context, src string) (string, error) {
 	ref, err := name.ParseReference(src)
 	if err != nil {
@@ -427,10 +349,3 @@ func loadTokenFile(path string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-func dstRegistryFromRepo(repo string) string {
-	parts := strings.SplitN(repo, "/", 2)
-	if len(parts) == 0 {
-		return ""
-	}
-	return parts[0]
-}

@@ -154,10 +154,6 @@ resource "azurerm_container_app" "replicator" {
         value = "${local.acr_login_server}/${var.dst_repo_prefix}"
       }
       env {
-        name  = "ACR_REGISTRY"
-        value = local.acr_login_server
-      }
-      env {
         name  = "IGNORE_REFERRERS"
         value = tostring(var.ignore_referrers)
       }
