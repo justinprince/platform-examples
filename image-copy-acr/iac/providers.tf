@@ -3,7 +3,6 @@ terraform {
     azurerm    = { source = "hashicorp/azurerm" }
     chainguard = { source = "chainguard-dev/chainguard" }
     ko         = { source = "ko-build/ko" }
-    null       = { source = "hashicorp/null" }
     random     = { source = "hashicorp/random" }
   }
 }

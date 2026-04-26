@@ -6,7 +6,6 @@ locals {
   acr_rg_id = var.existing_acr_name != "" ? data.azurerm_resource_group.acr_rg[0].id : azurerm_resource_group.main.id
 
   image_repo = "${local.acr_login_server}/cgr/image-copier"
-  image_tag  = "latest"
 }
 
 
@@ -56,33 +55,14 @@ data "azurerm_resource_group" "acr_rg" {
 
 # ── Container image ──────────────────────────────────────────────────────────
 #
-# Option A (active): build from the Dockerfile in the repo root.
 # Requires `az acr login --name <registry>` before `terraform apply`.
 
-resource "null_resource" "docker_build_push" {
-  triggers = {
-    dockerfile = filesha256("${path.cwd}/../Dockerfile")
-    main_go    = filesha256("${path.cwd}/../main.go")
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      docker build --platform linux/amd64 --pull -t ${local.image_repo}:${local.image_tag} ${path.cwd}/..
-      docker push ${local.image_repo}:${local.image_tag}
-    EOT
-  }
+resource "ko_build" "image" {
+  repo        = local.image_repo
+  importpath  = "github.com/chainguard-dev/platform-examples/image-copy-acr"
+  working_dir = "${path.module}/.."
+  sbom        = "none"
 }
-
-# Option B (commented out): build with KO directly from source.
-# Uncomment and remove the null_resource above once the importpath is
-# resolvable from this module (requires the module to be published).
-#
-# resource "ko_build" "image" {
-#   repo        = "${local.acr_login_server}/cgr/image-copier"
-#   importpath  = "github.com/chainguard-dev/platform-examples/image-copy-acr"
-#   working_dir = "${path.cwd}/.."
-#   sbom        = "none"
-# }
 
 # ── Managed identity ─────────────────────────────────────────────────────────
 
@@ -123,8 +103,6 @@ resource "azurerm_container_app" "replicator" {
   container_app_environment_id = azurerm_container_app_environment.main.id
   revision_mode                = "Single"
 
-  depends_on = [null_resource.docker_build_push]
-
   secret {
     name  = "chainguard-identity"
     value = chainguard_identity.azure.id
@@ -147,7 +125,7 @@ resource "azurerm_container_app" "replicator" {
 
     container {
       name   = "replicator"
-      image  = "${local.image_repo}:${local.image_tag}"
+      image  = ko_build.image.image_ref
       cpu    = 0.25
       memory = "0.5Gi"
 
