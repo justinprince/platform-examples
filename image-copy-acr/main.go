@@ -192,11 +192,13 @@ func resolveRepositoryName(ctx context.Context, repoID string) (string, error) {
 
 func newToken(ctx context.Context, audience string) (*sts.TokenPair, error) {
 	exch := sts.New(env.Issuer, audience, sts.WithIdentity(env.Identity))
-	tok, err := loadOIDCToken()
+	tok, err := azureCredential.GetToken(ctx, policy.TokenRequestOptions{
+		Scopes: []string{"api://AzureADTokenExchange"},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("loading OIDC token: %w", err)
+		return nil, fmt.Errorf("getting Azure token: %w", err)
 	}
-	cgTok, err := exch.Exchange(ctx, tok)
+	cgTok, err := exch.Exchange(ctx, tok.Token)
 	if err != nil {
 		return nil, fmt.Errorf("exchanging token: %w", err)
 	}
@@ -315,37 +317,4 @@ func checkOpts(ctx context.Context) (*cosign.CheckOpts, error) {
 	return co, nil
 }
 
-func loadOIDCToken() (string, error) {
-	if token := strings.TrimSpace(os.Getenv("OIDC_TOKEN")); token != "" {
-		return token, nil
-	}
-	if tokenFile := strings.TrimSpace(os.Getenv("OIDC_TOKEN_FILE")); tokenFile != "" {
-		return loadTokenFile(tokenFile)
-	}
-	if tokenFile := strings.TrimSpace(os.Getenv("AZURE_FEDERATED_TOKEN_FILE")); tokenFile != "" {
-		return loadTokenFile(tokenFile)
-	}
-	// Fall back to the Azure managed-identity token endpoint.
-	// Covers Container Apps (and other Azure-hosted environments) where a
-	// managed identity is attached but no token file is projected.
-	if azureCredential != nil {
-		tok, err := azureCredential.GetToken(context.Background(), policy.TokenRequestOptions{
-			Scopes: []string{"api://AzureADTokenExchange"},
-		})
-		if err != nil {
-			log.Printf("Warning: failed to get Azure managed identity OIDC token: %v", err)
-		} else {
-			return tok.Token, nil
-		}
-	}
-	return "", fmt.Errorf("no OIDC token source found; set OIDC_TOKEN, OIDC_TOKEN_FILE, or AZURE_FEDERATED_TOKEN_FILE")
-}
-
-func loadTokenFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("reading token file: %w", err)
-	}
-	return strings.TrimSpace(string(data)), nil
-}
 
