@@ -38,7 +38,7 @@ Chainguard Subscription ──► Container App (ca-cgr-replicator)  [HTTPS]
 | Role Assignment | `AcrPull` | Scoped to the resource group that contains the ACR |
 | Role Assignment | `AcrPush` | Scoped to the resource group that contains the ACR |
 | Container App Environment | `ace-cgr-replicator` | Consumption (serverless) plan |
-| Container App | `ca-cgr-replicator` | Runs the Docker-built replicator image |
+| Container App | `ca-cgr-replicator` | Runs the ko-built replicator image |
 
 ### Chainguard
 
@@ -46,6 +46,7 @@ Chainguard Subscription ──► Container App (ca-cgr-replicator)  [HTTPS]
 |---|---|
 | `chainguard_identity` | Workload identity bound to the managed identity via Azure AD claim matching |
 | `chainguard_rolebinding` | Grants the identity `registry.pull` on the target group |
+| `chainguard_rolebinding` | Grants the identity `viewer` on the target group (needed for signature verification) |
 | `chainguard_subscription` | Sends push events to the Container App's public URL |
 
 ---
@@ -57,7 +58,6 @@ Chainguard Subscription ──► Container App (ca-cgr-replicator)  [HTTPS]
 - [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.3
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) — authenticated with `az login`
 - [Chainguard CLI (`chainctl`)](https://edu.chainguard.dev/chainguard/chainguard-enforce/how-to-install-chainctl/) — authenticated with `chainctl auth login`
-- [Docker](https://docs.docker.com/get-docker/) — Terraform builds and pushes the container image via `docker` during `apply`
 
 ### Azure permissions
 
@@ -92,16 +92,16 @@ Edit `iac/terraform.tfvars`:
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `chainguard_org` | yes | — | Chainguard organization name (e.g. `your.org.com`) |
-| `location` | yes | `eastus` | Azure region |
-| `dst_repo_prefix` | yes | `mirrors` | Path prefix in the ACR for copied images |
+| `location` | no | `eastus` | Azure region |
+| `dst_repo_prefix` | no | `chainguard` | Path prefix in the ACR for copied images |
 | `ignore_referrers` | no | `false` | Skip copying signature/attestation tags |
 | `verify_signatures` | no | `false` | Verify Chainguard signatures before copying |
 | `existing_acr_name` | no | `""` | Name of an existing ACR to use; leave blank to create one |
 | `existing_acr_resource_group` | no | `""` | Resource group of the existing ACR; required when `existing_acr_name` is set |
 
-### 3. Authenticate Docker to the ACR
+### 3. Authenticate to the ACR
 
-Terraform builds and pushes the container image using Docker during `tf apply`. The `docker` CLI must be authenticated to the ACR before running `tf apply`.
+Terraform builds and pushes the container image using `ko` during `tf apply`. The Azure CLI must be authenticated to the ACR before running `tf apply` so that ko can push the image.
 
 **New ACR (Terraform will create it):** Targeted apply that will create the ACR registry which you will then log into using the `az acr login` command:
 
@@ -126,7 +126,7 @@ tf init
 tf apply
 ```
 
-Review the plan and confirm. On the first run this takes a few minutes — Docker builds the image and pushes it before the Container App is created.
+Review the plan and confirm. On the first run this takes a few minutes — ko builds and pushes the image before the Container App is created.
 
 ### 5. Verify
 
@@ -152,7 +152,7 @@ az containerapp logs show \
 |---|---|---|---|
 | `chainguard_org` | yes | — | Chainguard organization name (e.g. `your.org.com`) |
 | `location` | no | `eastus` | Azure region |
-| `dst_repo_prefix` | no | `mirrors` | Path prefix in the ACR for copied images |
+| `dst_repo_prefix` | no | `chainguard` | Path prefix in the ACR for copied images |
 | `ignore_referrers` | no | `false` | Skip copying signature/attestation tags |
 | `verify_signatures` | no | `false` | Verify Chainguard signatures before copying |
 | `existing_acr_name` | no | `""` | Name of an existing ACR to use; leave blank to create one |
@@ -163,7 +163,9 @@ az containerapp logs show \
 | Output | Description |
 |---|---|
 | `resource_group` | Name of the generated resource group |
+| `new_acr_name` | Name of the newly created ACR; null when reusing an existing one |
 | `acr_login_server` | ACR hostname (e.g. `myregistry.azurecr.io`) |
+| `acr_id` | Full Azure resource ID of the ACR |
 | `dst_repo` | Full destination repo prefix for copied images |
 | `webhook_url` | Public URL of the Container App / Chainguard subscription sink |
 | `managed_identity_id` | Resource ID of `mi-cgr-acr-pushpull` |
