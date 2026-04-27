@@ -9,15 +9,22 @@ If you supply `existing_acr_name` (and `existing_acr_resource_group`), Terraform
 
 ## How it works
 
-```
-Chainguard Registry
-       │  image pushed
-       │
-       ▼               event
-Chainguard Subscription ──► Container App (ca-cgr-replicator)  [HTTPS]
-                                    │  copies image
-                                    ▼
-                             Azure Container Registry
+```mermaid
+flowchart LR
+  subgraph CG[Chainguard]
+    REG[(Chainguard Registry)]
+    SUB[/Chainguard Subscription/]
+    REG -- image pushed --> SUB
+  end
+
+  subgraph AZ[Azure]
+    APP{{"Container App<br/>(ca-cgr-replicator)"}}
+    ACR[(Azure Container Registry)]
+    APP -- copies image --> ACR
+  end
+
+  SUB -- "CloudEvent<br/>(HTTPS POST)" --> APP
+  APP -- "pull image<br/>(OIDC)" --> REG
 ```
 
 1. Chainguard sends a CloudEvent (HTTPS POST) to the Container App's public HTTPS endpoint whenever an image is pushed to any repository in your group.
