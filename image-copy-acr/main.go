@@ -108,6 +108,11 @@ func main() {
 			return fmt.Errorf("failed to resolve repository name from id in the event: %w", err)
 		}
 
+		if repoName == "wolfi-dev-apk-bundle" || strings.HasSuffix(repoName, "/wolfi-dev-apk-bundle") {
+			log.Printf("repo %q is excluded; skipping", repoName)
+			return nil
+		}
+
 		src := "cgr.dev/" + env.GroupName + "/" + repoName + ":" + body.Tag
 		dst := env.DstRepo + "/" + repoName + ":" + body.Tag
 
