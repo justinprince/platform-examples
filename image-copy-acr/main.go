@@ -58,6 +58,36 @@ var keychain = authn.NewMultiKeychain(
 	authn.DefaultKeychain,
 )
 
+// excludedRepos is the set of repository leaf names that should never be
+// mirrored to ACR. Matched against the last path segment of the resolved
+// repository name, so flat names ("foo-bundle") and nested paths
+// ("group/foo-bundle") both match.
+//
+// To add an exclusion, add the leaf name to this map. Intentionally not
+// exposed via env var or Terraform — keep the list small and reviewed.
+var excludedRepos = map[string]bool{
+	"apk-bundle":                true,
+	"ca-apk-bundle":             true,
+	"ca-dev-apk-bundle":         true,
+	"chainguard-apk-bundle":     true,
+	"chainguard-apk-dev-bundle": true,
+	"chainguard-dev-apk-bundle": true,
+	"custom-assembly-bundle":    true,
+	"custom-assembly-packages":  true,
+	"custom-packages":           true,
+	"dev-apk-bundle":            true,
+	"wolfi-bundle":              true,
+	"wolfi-dev-apk-bundle":      true,
+}
+
+func isExcludedRepo(repoName string) bool {
+	leaf := repoName
+	if i := strings.LastIndex(repoName, "/"); i >= 0 {
+		leaf = repoName[i+1:]
+	}
+	return excludedRepos[leaf]
+}
+
 func init() {
 	err := envconfig.Process("", &env)
 	if err != nil {
@@ -108,7 +138,7 @@ func main() {
 			return fmt.Errorf("failed to resolve repository name from id in the event: %w", err)
 		}
 
-		if repoName == "wolfi-dev-apk-bundle" || strings.HasSuffix(repoName, "/wolfi-dev-apk-bundle") {
+		if isExcludedRepo(repoName) {
 			log.Printf("repo %q is excluded; skipping", repoName)
 			return nil
 		}
